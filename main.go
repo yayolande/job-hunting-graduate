@@ -1,7 +1,8 @@
 package main
 
 import (
-	"time"
+	"fmt"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
@@ -26,6 +27,8 @@ func main() {
 	app.Listen(port)
 }
 
+var secret_key string = "hello"
+
 func setupRoute(app *fiber.App) {
 	app.Get("/", func(c *fiber.Ctx) error {
 		// text := "Hello World !"
@@ -44,7 +47,6 @@ func setupRoute(app *fiber.App) {
 
 	api := app.Group("/api/v1")
 
-	// True work start here
 	// Note: JWT Token should only contains data necessary for authorization
 	// on the server. The remaining data can be passed normally
 	api.Post("/login", func(c *fiber.Ctx) error {
@@ -60,10 +62,9 @@ func setupRoute(app *fiber.App) {
 		claims := jwt.MapClaims{
 			"username": user.Username,
 			"password": user.Password,
-			"exp":      time.Now().Add(time.Minute * 5).Unix(),
+			// "exp":      time.Now().Add(time.Minute * 5).Unix(),
 		}
 
-		secret_key := "hello"
 		key := []byte(secret_key)
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 		token_string, _ := token.SignedString(key)
@@ -75,7 +76,6 @@ func setupRoute(app *fiber.App) {
 
 	api.Get("/test/static_token_extraction", func(c *fiber.Ctx) error {
 		token_string := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDE2MDg2MjQsInBhc3N3b3JkIjoiZWxpb3QiLCJ1c2VybmFtZSI6InN0ZXZlZW5zb24ifQ.mMvXGCSlrhEoidprn8GxW5DpJWWtq_DXD9i4uLPUR4U"
-		secret_key := "hello"
 
 		type Token_Info struct {
 			Username string `json:"username"`
@@ -88,12 +88,51 @@ func setupRoute(app *fiber.App) {
 			return []byte(secret_key), nil
 		})
 
-		_ = token.Valid
-		_ = err
+		if err != nil || !token.Valid {
+			fmt.Println(err)
+			return c.Status(fiber.StatusBadRequest).JSON(err.Error())
+		}
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"_token": _claims,
 		})
 
 	})
+
+	api.Get("/test/middlewareProtect", jwtMiddlewareProtect, func(c *fiber.Ctx) error {
+		fmt.Print("Inside Middleware Protect TEst")
+
+		return nil
+	})
+}
+
+func jwtMiddlewareProtect(c *fiber.Ctx) error {
+	token_string := extractTokenFromAuthHeader(c)
+	fmt.Printf("Token String = %v \n", token_string)
+
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(token_string, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret_key), nil
+	})
+
+	if err != nil || !token.Valid {
+		return err
+	}
+
+	fmt.Println("Claims = ")
+	fmt.Println(claims)
+
+	return c.Next()
+}
+
+func extractTokenFromAuthHeader(c *fiber.Ctx) string {
+	fmt.Println(c.GetReqHeaders())
+
+	headers := c.GetReqHeaders()
+	str := headers["Authorization"][0]
+
+	val_str := strings.Split(str, "BEARER")
+	token_string := strings.Trim(val_str[1], " ")
+
+	return token_string
 }
