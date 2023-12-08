@@ -45,6 +45,19 @@ type Job struct {
 	// City           string   `json:"city"`
 }
 
+func (j Job) isValid() bool {
+
+	if j.Title == "" || j.Role == "" {
+		return false
+	}
+
+	if j.YearExperience < 0 {
+		return false
+	}
+
+	return true
+}
+
 // =============================================
 // =============================================
 //              Table Definition
@@ -241,8 +254,16 @@ func setupRoute(app *fiber.App) {
 			})
 		}
 
+		if !job.isValid() {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Request data malformed or incorrect !",
+			})
+		}
+
+		DB.Create(&job)
+
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"test_data": job,
+			"job": job,
 		})
 	})
 }
