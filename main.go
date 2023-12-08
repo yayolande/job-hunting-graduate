@@ -221,24 +221,33 @@ func setupRoute(app *fiber.App) {
 	})
 
 	api.Post("/login", func(c *fiber.Ctx) error {
-		user := UserCredential{}
+		// Fetch User data
+		userCredential := UserCredential{}
 
-		if err := c.BodyParser(&user); err != nil {
+		if err := c.BodyParser(&userCredential); err != nil {
 			c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 				"message": err.Error(),
 			})
 		}
 
 		// Check User in DB
-		userPassport, err := getUserPassportFromCredential(user)
+		existingUsers := []UserTable{}
+		DB.Where("username = ? AND password = ?", userCredential.Username, userCredential.Password).Limit(1).Find(&existingUsers)
 
-		if err != nil {
+		if len(existingUsers) == 0 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": err.Error(),
+				"message": "Invalid Username or Password",
 			})
 		}
 
-		// If found, send token back to client
+		// If user found, send token back to client
+		userPassport := UserPassport{
+			Id:       existingUsers[0].Id,
+			Admin:    existingUsers[0].Admin,
+			Graduate: existingUsers[0].Graduate,
+			Employer: existingUsers[0].Employer,
+		}
+
 		claims := jwt.MapClaims{
 			"passport": userPassport,
 			// "exp":      time.Now().Add(time.Minute * 5).Unix(),
@@ -322,21 +331,6 @@ func setupRoute(app *fiber.App) {
 		})
 		// return nil
 	})
-}
-
-func getUserPassportFromCredential(client UserCredential) (*UserPassport, error) {
-	for _, user := range users {
-		credential := user.Credential
-
-		if credential.Username == client.Username && credential.Password == client.Password {
-			// TODO: Need better implementation
-			return &user.Passport, nil // This one is not good, what if later I modify user, it will also affect the database
-		}
-	}
-
-	var err error = fmt.Errorf("User not found")
-
-	return nil, err
 }
 
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
