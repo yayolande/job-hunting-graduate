@@ -231,6 +231,20 @@ func setupRoute(app *fiber.App) {
 			"jobs": availableJobs,
 		})
 	})
+
+	api.Post("/jobs", employerOnlyMiddleware, func(c *fiber.Ctx) error {
+		job := Job{}
+
+		if err := c.BodyParser(&job); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Request data malformed or incorrect !",
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"test_data": job,
+		})
+	})
 }
 
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
