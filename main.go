@@ -27,8 +27,8 @@ type UserPassport struct {
 }
 
 type User struct {
-	Credential UserCredential `json:"credential"`
-	Passport   UserPassport   `json:"passport"`
+	UserPassport
+	UserCredential
 }
 
 // Job properties inspired by : https://www.indeed.com/viewjob?jk=5d43c4aa2edf6f41&tk=1hh1n8q22jkuc800&from=serp&vjs=3
@@ -51,17 +51,6 @@ type Job struct {
 // =============================================
 // =============================================
 
-type UserTable struct {
-	// gorm.Model
-	UserPassport
-	UserCredential
-}
-
-type JobTable struct {
-	// gorm.Model
-	Job
-}
-
 // =============================================
 // =============================================
 //              End Table Definition
@@ -80,8 +69,7 @@ func main() {
 
 	DB = db
 	db.AutoMigrate(&Job{})
-	db.AutoMigrate(&UserTable{})
-	db.AutoMigrate(&JobTable{})
+	db.AutoMigrate(&User{})
 
 	// job := JobTable{
 	// 	Title:          "Software Engineer",
@@ -159,7 +147,7 @@ func setupRoute(app *fiber.App) {
 	api := app.Group("/api/v1")
 
 	api.Post("/registration", func(c *fiber.Ctx) error {
-		user := &UserTable{}
+		user := &User{}
 
 		if err := c.BodyParser(user); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -168,7 +156,7 @@ func setupRoute(app *fiber.App) {
 		}
 
 		// Check that the user doesn't already exist before creating it
-		existingUser := &[]UserTable{}
+		existingUser := &[]User{}
 		DB.Limit(1).Find(existingUser, "username = ?", user.Username)
 
 		if len(*existingUser) > 0 {
@@ -195,7 +183,7 @@ func setupRoute(app *fiber.App) {
 		}
 
 		// Check User in DB
-		existingUsers := []UserTable{}
+		existingUsers := []User{}
 		DB.Where("username = ? AND password = ?", userCredential.Username, userCredential.Password).Limit(1).Find(&existingUsers)
 
 		if len(existingUsers) == 0 {
@@ -235,7 +223,7 @@ func setupRoute(app *fiber.App) {
 	api.Use(jwtMiddlewareProtect)
 
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
-		availableJobs := []JobTable{}
+		availableJobs := []Job{}
 
 		DB.Find(&availableJobs)
 
@@ -318,7 +306,6 @@ func getUserPassportFromMiddlewareContext(c *fiber.Ctx) UserPassport {
 
 // Middleware that check if the token is valid (that the user is registered in the site)
 func jwtMiddlewareProtect(c *fiber.Ctx) error {
-	// Every token only have the UserPassword, not all the User type
 	token_string := extractTokenFromAuthHeader(c)
 	fmt.Printf("Token String = %v \n", token_string)
 
@@ -326,13 +313,6 @@ func jwtMiddlewareProtect(c *fiber.Ctx) error {
 		jwt.RegisteredClaims
 		Passport UserPassport `json:"passport"`
 	}
-
-	// _claims := jwt.MapClaims{}
-	// token, err = jwt.ParseWithClaims(token_string, _claims, func(token *jwt.Token) (interface{}, error) {
-	// 	return []byte(secret_key), nil
-	// })
-	// fmt.Println("Claims = ")
-	// fmt.Println(_claims)
 
 	// claims := jwt.MapClaims{}
 	claims := &CustomClaims{}
@@ -344,12 +324,6 @@ func jwtMiddlewareProtect(c *fiber.Ctx) error {
 		return err
 	}
 
-	fmt.Println("Claims = ")
-	fmt.Println(claims)
-
-	// TODO: Use "UserPassport" instead of "User"
-	// c.Locals("users", users) // Only here for testing in "/jobs" path, not necessary
-	// c.Locals("user", users[1])
 	c.Locals("user_passport", claims.Passport)
 
 	return c.Next()
