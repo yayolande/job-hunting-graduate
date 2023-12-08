@@ -1,11 +1,17 @@
 package main
 
 import (
+	// "database/sql"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+
+	// _ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type inputJson struct {
@@ -44,9 +50,81 @@ type Job struct {
 	// City           string   `json:"city"`
 }
 
-func main() {
-	app := fiber.New()
+// =============================================
+// =============================================
+//              Table Definition
+// =============================================
+// =============================================
 
+type UserTable struct {
+	// gorm.Model
+	UserPassport
+	UserCredential
+}
+
+type JobTable struct {
+	// gorm.Model
+	Job
+}
+
+// =============================================
+// =============================================
+//              End Table Definition
+// =============================================
+// =============================================
+
+func main() {
+
+	// os.Remove("./jobs.db")
+	// db, err := sql.Open("sqlite3", "./jobs.db")
+
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// defer db.Close()
+
+	// var sqlStmt string = `
+	// create table Jobs (id integer not null primary key, title text);
+	// delete from Jobs;
+	// `
+	// _, err = db.Exec(sqlStmt)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	db, err := gorm.Open(sqlite.Open("./jobs.db"), &gorm.Config{})
+	if err != nil {
+		log.Fatal("Upcoming error")
+		panic("failed to connect to the database")
+	}
+
+	DB = db
+	db.AutoMigrate(&Job{})
+	db.AutoMigrate(&UserTable{})
+
+	// job := Job{
+	// 	Title:          "Software Engineer",
+	// 	Role:           "Software Engineer",
+	// 	YearExperience: 2,
+	// 	// Id: 1,
+	// }
+
+	// db.Create(&job)
+
+	// job = Job{
+	// 	Title:          "Cheater",
+	// 	Role:           "Cheater",
+	// 	YearExperience: 5,
+	// 	// Id: 1,
+	// }
+	// db.Create(&job)
+
+	var j1 []Job
+	db.Find(&j1)
+
+	fmt.Println(j1)
+
+	app := fiber.New()
 	setupRoute(app)
 
 	port := ":2200"
@@ -54,6 +132,7 @@ func main() {
 }
 
 var secret_key string = "hello"
+var DB *gorm.DB
 var users = []User{
 	{
 		Credential: UserCredential{"admin", "admin"},
@@ -106,6 +185,40 @@ func setupRoute(app *fiber.App) {
 	// on the server. The remaining data can be passed normally
 
 	// TODO: Registration API path
+	api.Post("/registration", func(c *fiber.Ctx) error {
+		user := &UserTable{}
+
+		if err := c.BodyParser(user); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		// Check that the user doesn't already exist before creating it
+		existingUser := &[]UserTable{}
+		DB.Limit(1).Find(existingUser, "username = ?", user.Username)
+
+		if len(*existingUser) > 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "User with username '" + user.Username + "' already exists",
+			})
+		}
+
+		// err := func() error {
+		// 	DB.First(existingUser, "username = ?", "grad")
+		// 	return nil
+		// }
+
+		// if err != nil {
+		// 	fmt.Println("DB.Fist() Panic Contained !!!!!!!")
+		// }
+
+		DB.Create(user)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"data": user,
+		})
+	})
 
 	api.Post("/login", func(c *fiber.Ctx) error {
 		user := UserCredential{}
