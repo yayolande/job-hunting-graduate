@@ -64,10 +64,19 @@ var users = []User{
 		Passport:   UserPassport{2, false, true, false},
 	},
 	{
+		Credential: UserCredential{"graduate", "graduate"},
+		Passport:   UserPassport{3, false, true, false},
+	},
+	{
 		Credential: UserCredential{"Mojo Corp.", "mojo"},
-		Passport:   UserPassport{2, false, false, true},
+		Passport:   UserPassport{4, false, false, true},
+	},
+	{
+		Credential: UserCredential{"employer", "employer"},
+		Passport:   UserPassport{5, false, false, true},
 	},
 }
+
 var _jobs = []string{"JOb 1", "Job 2", "Job 3", "Job 4", "Job 5"}
 var jobs = []Job{
 	{0, "Need of Software Engineer", "Software Developer", 2},
@@ -102,15 +111,23 @@ func setupRoute(app *fiber.App) {
 		user := UserCredential{}
 
 		if err := c.BodyParser(&user); err != nil {
-			c.Status(fiber.StatusBadGateway).Send([]byte(err.Error()))
+			c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+				"message": err.Error(),
+			})
 		}
 
 		// Check User in DB
+		userPassport, err := getUserPassportFromCredential(user)
+
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
 
 		// If found, send token back to client
 		claims := jwt.MapClaims{
-			"username": user.Username,
-			"password": user.Password,
+			"passport": userPassport,
 			// "exp":      time.Now().Add(time.Minute * 5).Unix(),
 		}
 
@@ -184,7 +201,7 @@ func setupRoute(app *fiber.App) {
 
 	api.Use(jwtMiddlewareProtect)
 
-	api.Get("/jobs", employerOnlyMiddleware, func(c *fiber.Ctx) error {
+	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		// Return all list of available job, if an user is a graduate
 		// In case of not being a graduate, return an error
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -194,8 +211,23 @@ func setupRoute(app *fiber.App) {
 	})
 }
 
+func getUserPassportFromCredential(client UserCredential) (*UserPassport, error) {
+	for _, user := range users {
+		credential := user.Credential
+
+		if credential.Username == client.Username && credential.Password == client.Password {
+			// TODO: Need better implementation
+			return &user.Passport, nil // This one is not good, what if later I modify user, it will also affect the database
+		}
+	}
+
+	var err error = fmt.Errorf("User not found")
+
+	return nil, err
+}
+
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
-	var passport UserPassport = c.Locals("user").(User).Passport
+	var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 
 	if passport.Admin == true {
 		return c.Next()
@@ -211,7 +243,10 @@ func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
 }
 
 func graduateOnlyMiddleware(c *fiber.Ctx) error {
-	var passport UserPassport = c.Locals("user").(User).Passport
+	// return c.JSON(fiber.Map{
+	// 	"user_passport": c.Locals("user_passport"),
+	// })
+	var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 
 	if passport.Admin == true {
 		return c.Next()
@@ -227,7 +262,7 @@ func graduateOnlyMiddleware(c *fiber.Ctx) error {
 }
 
 func employerOnlyMiddleware(c *fiber.Ctx) error {
-	var passport UserPassport = c.Locals("user").(User).Passport
+	var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 
 	if passport.Admin == true {
 		return c.Next()
@@ -243,7 +278,7 @@ func employerOnlyMiddleware(c *fiber.Ctx) error {
 }
 
 func adminOnlyMiddleware(c *fiber.Ctx) error {
-	var passport UserPassport = c.Locals("user").(User).Passport
+	var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 
 	if passport.Admin == true {
 		return c.Next()
@@ -254,13 +289,34 @@ func adminOnlyMiddleware(c *fiber.Ctx) error {
 	})
 }
 
+func getUserPassportFromMiddlewareContext(c *fiber.Ctx) UserPassport {
+	passport := c.Locals("user_passport")
+	fmt.Printf("\n UserPassport = %v \n", passport)
+	userPassport := passport.(UserPassport)
+
+	return userPassport
+}
+
 // Middleware that check if the token is valid (that the user is registered in the site)
 func jwtMiddlewareProtect(c *fiber.Ctx) error {
 	// Every token only have the UserPassword, not all the User type
 	token_string := extractTokenFromAuthHeader(c)
 	fmt.Printf("Token String = %v \n", token_string)
 
-	claims := jwt.MapClaims{}
+	type CustomClaims struct {
+		jwt.RegisteredClaims
+		Passport UserPassport `json:"passport"`
+	}
+
+	// _claims := jwt.MapClaims{}
+	// token, err = jwt.ParseWithClaims(token_string, _claims, func(token *jwt.Token) (interface{}, error) {
+	// 	return []byte(secret_key), nil
+	// })
+	// fmt.Println("Claims = ")
+	// fmt.Println(_claims)
+
+	// claims := jwt.MapClaims{}
+	claims := &CustomClaims{}
 	token, err := jwt.ParseWithClaims(token_string, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret_key), nil
 	})
@@ -272,15 +328,10 @@ func jwtMiddlewareProtect(c *fiber.Ctx) error {
 	fmt.Println("Claims = ")
 	fmt.Println(claims)
 
-	// if claims["username"] != "admin" {
-	// 	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-	// 		"message": "Unauthorized",
-	// 	})
-	// }
-
 	// TODO: Use "UserPassport" instead of "User"
 	c.Locals("users", users) // Only here for testing in "/jobs" path, not necessary
 	c.Locals("user", users[1])
+	c.Locals("user_passport", claims.Passport)
 
 	return c.Next()
 }
