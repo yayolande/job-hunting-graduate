@@ -76,21 +76,6 @@ type JobTable struct {
 func main() {
 
 	// os.Remove("./jobs.db")
-	// db, err := sql.Open("sqlite3", "./jobs.db")
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// defer db.Close()
-
-	// var sqlStmt string = `
-	// create table Jobs (id integer not null primary key, title text);
-	// delete from Jobs;
-	// `
-	// _, err = db.Exec(sqlStmt)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 
 	db, err := gorm.Open(sqlite.Open("./jobs.db"), &gorm.Config{})
 	if err != nil {
@@ -101,13 +86,42 @@ func main() {
 	DB = db
 	db.AutoMigrate(&Job{})
 	db.AutoMigrate(&UserTable{})
+	db.AutoMigrate(&JobTable{})
 
-	// job := Job{
+	// job := JobTable{
 	// 	Title:          "Software Engineer",
 	// 	Role:           "Software Engineer",
 	// 	YearExperience: 2,
 	// 	// Id: 1,
 	// }
+
+	// _job := JobTable{
+	// 	Job: Job{
+	// 		Title:          "Software Engineer",
+	// 		Role:           "Software Engineer",
+	// 		YearExperience: 2,
+	// 		// Id: 1,
+	// 	},
+	// }
+
+	// db.Create(&_job)
+
+	// _job = JobTable{
+	// 	Job{
+	// 		Title: "Chef Cook",
+	// 	},
+	// }
+
+	// db.Create(&_job)
+
+	// _job = JobTable{
+	// 	Job: Job{
+	// 		Role:  "Cleaner",
+	// 		Title: "ABC Company need a cleaner",
+	// 	},
+	// }
+
+	// db.Create(&_job)
 
 	// db.Create(&job)
 
@@ -133,35 +147,6 @@ func main() {
 
 var secret_key string = "hello"
 var DB *gorm.DB
-var users = []User{
-	{
-		Credential: UserCredential{"admin", "admin"},
-		Passport:   UserPassport{1, true, false, false},
-	},
-	{
-		Credential: UserCredential{"steveen", "password"},
-		Passport:   UserPassport{2, false, true, false},
-	},
-	{
-		Credential: UserCredential{"graduate", "graduate"},
-		Passport:   UserPassport{3, false, true, false},
-	},
-	{
-		Credential: UserCredential{"Mojo Corp.", "mojo"},
-		Passport:   UserPassport{4, false, false, true},
-	},
-	{
-		Credential: UserCredential{"employer", "employer"},
-		Passport:   UserPassport{5, false, false, true},
-	},
-}
-
-var _jobs = []string{"JOb 1", "Job 2", "Job 3", "Job 4", "Job 5"}
-var jobs = []Job{
-	{0, "Need of Software Engineer", "Software Developer", 2},
-	{1, "Hospital need Doctor", "Head Doctor", 5},
-	{1, "Beer Company need finance officer", "Finance Director", 10},
-}
 
 func setupRoute(app *fiber.App) {
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -284,7 +269,7 @@ func setupRoute(app *fiber.App) {
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"token": token_string,
-			"users": users,
+			// "users": users,
 		})
 	})
 
@@ -324,12 +309,13 @@ func setupRoute(app *fiber.App) {
 	api.Use(jwtMiddlewareProtect)
 
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
-		// Return all list of available job, if an user is a graduate
-		// In case of not being a graduate, return an error
+		availableJobs := []JobTable{}
+
+		DB.Find(&availableJobs)
+
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"jobs": jobs,
+			"jobs": availableJobs,
 		})
-		// return nil
 	})
 }
 
@@ -436,8 +422,8 @@ func jwtMiddlewareProtect(c *fiber.Ctx) error {
 	fmt.Println(claims)
 
 	// TODO: Use "UserPassport" instead of "User"
-	c.Locals("users", users) // Only here for testing in "/jobs" path, not necessary
-	c.Locals("user", users[1])
+	// c.Locals("users", users) // Only here for testing in "/jobs" path, not necessary
+	// c.Locals("user", users[1])
 	c.Locals("user_passport", claims.Passport)
 
 	return c.Next()
