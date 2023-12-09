@@ -246,7 +246,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Post("/apply", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
+	api.Post("/application", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		application := JobApplication{}
 
 		if err := c.BodyParser(&application); err != nil {
@@ -269,7 +269,7 @@ func setupRoute(app *fiber.App) {
 	})
 
 	// TODO: Add additional "Middleware" to protect this route
-	api.Get("/apply", func(c *fiber.Ctx) error {
+	api.Get("/application", func(c *fiber.Ctx) error {
 		applications := []JobApplication{}
 
 		DB.Preload("Job").Preload("Graduate").Find(&applications)
@@ -280,7 +280,15 @@ func setupRoute(app *fiber.App) {
 	})
 
 	// TODO: Add additional "Middleware" to protect this route
-	api.Get("/apply/:job_id", func(c *fiber.Ctx) error {
+	api.Get("/application/:job_id/:graduate_id", func(c *fiber.Ctx) error {
+		return fiber.ErrNotImplemented
+	})
+
+	api.Get("/application/job/:job_id", func(c *fiber.Ctx) error {
+		return fiber.ErrNotImplemented
+	})
+
+	api.Get("/application/graduate/:graduate_id", func(c *fiber.Ctx) error {
 		return fiber.ErrNotImplemented
 	})
 }
