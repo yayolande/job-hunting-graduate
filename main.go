@@ -58,20 +58,45 @@ func (j Job) isValid() bool {
 	return true
 }
 
-// =============================================
-// =============================================
-//              Table Definition
-// =============================================
-// =============================================
+type JobApplication struct {
+	Id         int  `json:"id"`
+	GraduateId int  `json:"graduate_id"`
+	JobId      int  `json:"job_id"`
+	Graduate   User `gorm:"foreignKey:GraduateId"`
+	Job        Job  `gorm:"foreignKey:JobId"`
+}
 
-// =============================================
-// =============================================
-//              End Table Definition
-// =============================================
-// =============================================
+// return type "error" instead of "bool" ?????
+func (j JobApplication) isValid() error {
+	var err error = nil
+
+	// Part 1: Check if the application already exist
+	result := []JobApplication{}
+	DB.Where("job_id = ? AND graduate_id = ?", j.JobId, j.GraduateId).Find(&result)
+
+	if len(result) > 0 {
+		err = fmt.Errorf("This graduate has Already applied to this Job")
+		return err
+	}
+
+	// Part 2: Check if the job and graduate exist to avoid broken references
+	jobs := []Job{}
+	graduates := []User{}
+
+	DB.Where("id = ?", j.JobId).Find(&jobs)
+	DB.Where("id = ?", j.GraduateId).Find(&graduates)
+
+	if len(jobs) == 0 || len(graduates) == 0 {
+		err = fmt.Errorf("Graduate or Job not found in the system")
+		return err
+	}
+
+	return err
+}
 
 func main() {
 
+	// 1 -- Database Definition
 	// os.Remove("./jobs.db")
 
 	db, err := gorm.Open(sqlite.Open("./jobs.db"), &gorm.Config{})
@@ -83,57 +108,9 @@ func main() {
 	DB = db
 	db.AutoMigrate(&Job{})
 	db.AutoMigrate(&User{})
+	db.AutoMigrate(&JobApplication{})
 
-	// job := JobTable{
-	// 	Title:          "Software Engineer",
-	// 	Role:           "Software Engineer",
-	// 	YearExperience: 2,
-	// 	// Id: 1,
-	// }
-
-	// _job := JobTable{
-	// 	Job: Job{
-	// 		Title:          "Software Engineer",
-	// 		Role:           "Software Engineer",
-	// 		YearExperience: 2,
-	// 		// Id: 1,
-	// 	},
-	// }
-
-	// db.Create(&_job)
-
-	// _job = JobTable{
-	// 	Job{
-	// 		Title: "Chef Cook",
-	// 	},
-	// }
-
-	// db.Create(&_job)
-
-	// _job = JobTable{
-	// 	Job: Job{
-	// 		Role:  "Cleaner",
-	// 		Title: "ABC Company need a cleaner",
-	// 	},
-	// }
-
-	// db.Create(&_job)
-
-	// db.Create(&job)
-
-	// job = Job{
-	// 	Title:          "Cheater",
-	// 	Role:           "Cheater",
-	// 	YearExperience: 5,
-	// 	// Id: 1,
-	// }
-	// db.Create(&job)
-
-	var j1 []Job
-	db.Find(&j1)
-
-	fmt.Println(j1)
-
+	// 2 -- Launching the server
 	app := fiber.New()
 	setupRoute(app)
 
@@ -235,6 +212,8 @@ func setupRoute(app *fiber.App) {
 
 	api.Use(jwtMiddlewareProtect)
 
+	// TODO: Add side effect, so that jobs that a graduate have applied
+	// are also returned separately (jobs, applied)
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
@@ -266,6 +245,32 @@ func setupRoute(app *fiber.App) {
 			"job": job,
 		})
 	})
+
+	api.Post("/apply", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
+		application := JobApplication{}
+
+		if err := c.BodyParser(&application); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		if err := application.isValid(); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		DB.Create(&application)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"application": application,
+		})
+	})
+
+	api.Get("/apply", func(c *fiber.Ctx) error {
+		return nil
+	})
 }
 
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
@@ -285,9 +290,6 @@ func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
 }
 
 func graduateOnlyMiddleware(c *fiber.Ctx) error {
-	// return c.JSON(fiber.Map{
-	// 	"user_passport": c.Locals("user_passport"),
-	// })
 	var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 
 	if passport.Admin == true {
