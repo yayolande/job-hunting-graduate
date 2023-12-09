@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 
-	// _ "github.com/mattn/go-sqlite3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -45,18 +43,20 @@ type Job struct {
 	// City           string   `json:"city"`
 }
 
-// TODO: Change return type from "bool" to "error", and send explicit error "message"
-func (j Job) isValid() bool {
+func (j Job) isValid() error {
+	var err error = nil
 
 	if j.Title == "" || j.Role == "" {
-		return false
+		err = fmt.Errorf("Job title and role are mandatory when creating new Job")
+		return fiber.ErrBadGateway
 	}
 
 	if j.YearExperience < 0 {
-		return false
+		err = fmt.Errorf("Minimum Year of Experience can't go below 0 for creating a new Job")
+		return err
 	}
 
-	return true
+	return err
 }
 
 type JobApplication struct {
@@ -229,13 +229,13 @@ func setupRoute(app *fiber.App) {
 
 		if err := c.BodyParser(&job); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Request data malformed or incorrect !",
+				"message": err.Error(),
 			})
 		}
 
-		if !job.isValid() {
+		if err := job.isValid(); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Request data malformed or incorrect !",
+				"message": err.Error(),
 			})
 		}
 
