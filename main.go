@@ -280,16 +280,57 @@ func setupRoute(app *fiber.App) {
 	})
 
 	// TODO: Add additional "Middleware" to protect this route
-	api.Get("/application/:job_id/:graduate_id", func(c *fiber.Ctx) error {
-		return fiber.ErrNotImplemented
+	api.Get("/application/:job_id<int>/:graduate_id<int>", func(c *fiber.Ctx) error {
+		var jobId string = c.Params("job_id")
+		var graduateId string = c.Params("graduate_id")
+
+		applications := []JobApplication{}
+
+		DB.Preload("Graduate").Preload("Job").
+			Where("job_id = ? AND graduate_id = ?", jobId, graduateId).
+			Find(&applications)
+
+		if len(applications) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "Application to this Job not found for this Graduate",
+			})
+		}
+
+		if len(applications) > 1 {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Internal Server Error -- Multiple Applications found to the same Job for this Graduate",
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_application": applications[0],
+		})
 	})
 
 	api.Get("/application/job/:job_id", func(c *fiber.Ctx) error {
-		return fiber.ErrNotImplemented
+		var jobId string = c.Params("job_id")
+
+		applications := []JobApplication{}
+		DB.Preload("Graduate").Preload("Job").
+			Where("job_id = ?", jobId).
+			Find(&applications)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_applications": applications,
+		})
 	})
 
 	api.Get("/application/graduate/:graduate_id", func(c *fiber.Ctx) error {
-		return fiber.ErrNotImplemented
+		var graduateId string = c.Params("graduate_id")
+
+		applications := []JobApplication{}
+		DB.Preload("Graduate").Preload("Job").
+			Where("graduate_id = ?", graduateId).
+			Find(&applications)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_applications": applications,
+		})
 	})
 }
 
