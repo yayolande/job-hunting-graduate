@@ -45,6 +45,7 @@ type Job struct {
 	// City           string   `json:"city"`
 }
 
+// TODO: Change return type from "bool" to "error", and send explicit error "message"
 func (j Job) isValid() bool {
 
 	if j.Title == "" || j.Role == "" {
@@ -66,7 +67,6 @@ type JobApplication struct {
 	Job        Job  `gorm:"foreignKey:JobId"`
 }
 
-// return type "error" instead of "bool" ?????
 func (j JobApplication) isValid() error {
 	var err error = nil
 
@@ -264,12 +264,24 @@ func setupRoute(app *fiber.App) {
 		DB.Create(&application)
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"application": application,
+			"job_application": application,
 		})
 	})
 
+	// TODO: Add additional "Middleware" to protect this route
 	api.Get("/apply", func(c *fiber.Ctx) error {
-		return nil
+		applications := []JobApplication{}
+
+		DB.Preload("Job").Preload("Graduate").Find(&applications)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_applications": applications,
+		})
+	})
+
+	// TODO: Add additional "Middleware" to protect this route
+	api.Get("/apply/:job_id", func(c *fiber.Ctx) error {
+		return fiber.ErrNotImplemented
 	})
 }
 
