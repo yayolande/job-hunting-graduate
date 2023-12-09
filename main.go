@@ -332,6 +332,27 @@ func setupRoute(app *fiber.App) {
 			"job_applications": applications,
 		})
 	})
+
+	api.Get("/user/graduate", func(c *fiber.Ctx) error {
+		graduates := []User{}
+
+		DB.Where("graduate = true").Find(&graduates)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"graduates": graduates,
+		})
+	})
+
+	api.Get("/user/employer", func(c *fiber.Ctx) error {
+		employers := []User{}
+
+		DB.Where("employer = true").Find(&employers)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"employers": employers,
+		})
+	})
+
 }
 
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
