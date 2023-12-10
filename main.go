@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,8 +14,8 @@ import (
 )
 
 type UserCredential struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type UserPassport struct {
@@ -27,6 +28,10 @@ type UserPassport struct {
 type User struct {
 	UserPassport
 	UserCredential
+}
+
+func (u *User) hideSensitiveData() {
+	u.UserCredential.Password = ""
 }
 
 // Job properties inspired by : https://www.indeed.com/viewjob?jk=5d43c4aa2edf6f41&tk=1hh1n8q22jkuc800&from=serp&vjs=3
@@ -94,6 +99,59 @@ func (j JobApplication) isValid() error {
 	return err
 }
 
+type Friendship struct {
+	Id     int  `json:"id"`
+	FromId int  `json:"from"`
+	ToId   int  `json:"to"`
+	From   User `gorm:"foreignKey:FromId"`
+	To     User `gorm:"foreignKey:ToId"`
+}
+
+func (f *Friendship) isValid() error {
+	var err error = nil
+
+	if f.FromId == f.ToId {
+		err = fmt.Errorf("You can't add yourself as a friend")
+		return err
+	}
+
+	friendship := []Friendship{}
+	DB.Where("from_id = ? AND to_id = ?", f.FromId, f.ToId).
+		Or("from_id = ? AND to_id = ?", f.ToId, f.FromId).
+		Find(&friendship)
+
+	if len(friendship) > 0 {
+		err = fmt.Errorf("Friendship already exists")
+		return err
+	}
+
+	users := []User{}
+	DB.Where("id IN ?", []string{strconv.Itoa(f.FromId), strconv.Itoa(f.ToId)}).
+		Find(&users)
+
+	if len(users) != 2 {
+		err = fmt.Errorf("User not found in the system")
+		return err
+	}
+
+	// FIXME: I don't like this one (this is a side effect)
+	// It should be its own function
+	if f.FromId == users[0].Id {
+		f.From = users[0]
+		f.To = users[1]
+	} else {
+		f.From = users[1]
+		f.To = users[0]
+	}
+
+	return err
+}
+
+func (f *Friendship) hideSensitiveData() {
+	f.From.hideSensitiveData()
+	f.To.hideSensitiveData()
+}
+
 func main() {
 
 	// 1 -- Database Definition
@@ -109,6 +167,7 @@ func main() {
 	db.AutoMigrate(&Job{})
 	db.AutoMigrate(&User{})
 	db.AutoMigrate(&JobApplication{})
+	db.AutoMigrate(&Friendship{})
 
 	// 2 -- Launching the server
 	app := fiber.New()
@@ -212,8 +271,6 @@ func setupRoute(app *fiber.App) {
 
 	api.Use(jwtMiddlewareProtect)
 
-	// TODO: Add side effect, so that jobs that a graduate have applied
-	// are also returned separately (jobs, applied)
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
@@ -246,6 +303,8 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
+	// FIXME: "GET" methods send user password as well
+	// Remove it from the JSON response
 	api.Post("/application", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		application := JobApplication{}
 
@@ -353,6 +412,94 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
+	api.Get("/friends", func(c *fiber.Ctx) error {
+		friends := []Friendship{}
+
+		DB.Preload("From").Preload("To").Find(&friends)
+
+		hideSensitiveFriendshipData(&friends)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"friends": friends,
+		})
+	})
+
+	api.Post("/friends", func(c *fiber.Ctx) error {
+		friendship := Friendship{}
+
+		if err := c.BodyParser(&friendship); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		if err := friendship.isValid(); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		DB.Create(&friendship)
+
+		friendship.hideSensitiveData()
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"friends": friendship,
+		})
+	})
+
+	api.Get("/friends/:my_id", func(c *fiber.Ctx) error {
+		id := c.Params("my_id")
+
+		friends := []Friendship{}
+		DB.Where("from_id = ? OR to_id = ?", id, id).
+			Preload("From").Preload("To").
+			Find(&friends)
+
+		hideSensitiveFriendshipData(&friends)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"friends": friends,
+		})
+	})
+
+	api.Get("/friends/:my_id/:friend_id", func(c *fiber.Ctx) error {
+		myId := c.Params("my_id")
+		friendId := c.Params("friend_id")
+
+		friends := []Friendship{}
+		DB.Where("(from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)", myId, friendId, friendId, myId).
+			Preload("From").Preload("To").
+			Find(&friends)
+
+		if len(friends) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "Friendship not found",
+			})
+		}
+
+		hideSensitiveFriendshipData(&friends)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"friend": friends[0],
+		})
+	})
+}
+
+func hideSensitiveFriendshipData(friends *[]Friendship) {
+	for key, _ := range *friends {
+		friend := &(*friends)[key]
+
+		friend.hideSensitiveData()
+	}
+}
+
+func hideSensitiveUserData(users *[]User) {
+	for key, _ := range *users {
+		user := &(*users)[key]
+
+		(*user).hideSensitiveData()
+	}
 }
 
 func graduateEmployerOnlyMiddleware(c *fiber.Ctx) error {
