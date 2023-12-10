@@ -152,6 +152,35 @@ func (f *Friendship) hideSensitiveData() {
 	f.To.hideSensitiveData()
 }
 
+type Message struct {
+	Id         int    `json:"id"`
+	SenderId   int    `json:"sender_id"`
+	ReceiverId int    `json:"receiver_id"`
+	Message    string `json:"message"`
+	Sender     User   `gorm:"ForeignKey:SenderId" json:"-"`
+	Receiver   User   `gorm:"ForeignKey:ReceiverId" json:"-"`
+}
+
+func (m Message) isValid() error {
+	var err error = nil
+
+	users := []User{}
+	DB.Where("id IN ?", []string{strconv.Itoa(m.SenderId), strconv.Itoa(m.ReceiverId)}).
+		Find(&users)
+
+	if len(users) != 2 && len(users) != 1 {
+		err = fmt.Errorf("User not found in the system")
+		return err
+	}
+
+	if len(m.Message) == 0 {
+		err = fmt.Errorf("Message can't be empty")
+		return err
+	}
+
+	return err
+}
+
 func main() {
 
 	// 1 -- Database Definition
@@ -168,6 +197,7 @@ func main() {
 	db.AutoMigrate(&User{})
 	db.AutoMigrate(&JobApplication{})
 	db.AutoMigrate(&Friendship{})
+	db.AutoMigrate(&Message{})
 
 	// 2 -- Launching the server
 	app := fiber.New()
@@ -484,6 +514,88 @@ func setupRoute(app *fiber.App) {
 			"friend": friends[0],
 		})
 	})
+
+	api.Get("/messages", func(c *fiber.Ctx) error {
+		messages := []Message{}
+
+		DB.Find(&messages)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"messages": messages,
+		})
+	})
+
+	api.Post("/messages", func(c *fiber.Ctx) error {
+		message := Message{}
+
+		if err := c.BodyParser(&message); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		if err := message.isValid(); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		DB.Create(&message)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message": message,
+		})
+	})
+
+	api.Get("/messages/:sender_id<int>/:receiver_id<int>", func(c *fiber.Ctx) error {
+		senderId := c.Params("sender_id")
+		receiverId := c.Params("receiver_id")
+
+		messages := []Message{}
+		DB.Where("sender_id = ? AND receiver_id = ? OR sender_id = ? AND receiver_id = ?", senderId, receiverId, receiverId, senderId).
+			Find(&messages)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"messages": messages,
+		})
+	})
+
+	api.Get("/messages/lasts/:user_id<int>", func(c *fiber.Ctx) error {
+		user_id := c.Params("user_id")
+
+		messages := []Message{}
+		DB.Where("sender_id = ? OR receiver_id = ?", user_id, user_id).
+			Find(&messages)
+
+		// Finding out the last message for each conversion between two users
+		counter := 0
+		lastMessages := []Message{}
+
+		lastMessages = append(lastMessages, messages[0])
+
+		for _, message := range messages {
+			for key, lastMsg := range lastMessages {
+				if (lastMsg.SenderId == message.SenderId && lastMsg.ReceiverId == message.ReceiverId) ||
+					(lastMsg.SenderId == message.ReceiverId && lastMsg.ReceiverId == message.SenderId) {
+					lastMessages[key] = message
+					break
+				}
+
+				counter = key
+			}
+
+			if counter == len(lastMessages)-1 {
+				lastMessages = append(lastMessages, message)
+			}
+		}
+
+		messages = lastMessages
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"messages": messages,
+		})
+	})
+
 }
 
 func hideSensitiveFriendshipData(friends *[]Friendship) {
