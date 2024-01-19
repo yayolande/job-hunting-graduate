@@ -711,7 +711,16 @@ func extractTokenFromAuthHeader(c *fiber.Ctx) string {
 	fmt.Println(c.GetReqHeaders())
 
 	headers := c.GetReqHeaders()
+	if len(headers["Authorization"]) == 0 {
+		fmt.Println("[Warning] Authorization headers not found")
+		return ""
+	}
 	str := headers["Authorization"][0]
+
+	if !strings.Contains(str, "BEARER") {
+		fmt.Println("[Error] Malformated Authorization Headers, 'BEARER' separator not present")
+		return ""
+	}
 
 	val_str := strings.Split(str, "BEARER")
 	token_string := strings.Trim(val_str[1], " ")
