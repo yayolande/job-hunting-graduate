@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/smtp"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,12 +15,14 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type UserCredential struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	Email    string `json:"email,omitempty"`
 }
 
 type UserPassport struct {
@@ -35,6 +39,23 @@ type User struct {
 
 func (u *User) hideSensitiveData() {
 	u.UserCredential.Password = ""
+}
+
+func (u User) IsMandatoryFieldFilled() bool {
+	if len(u.Username) <= 0 || len(u.Password) <= 0 || len(u.Email) <= 0 {
+		fmt.Println("Empty field Detected for user credential")
+		fmt.Println(u)
+		return false
+	}
+
+	emailRegex := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	match, err := regexp.MatchString(emailRegex, u.Email)
+	if err != nil {
+		fmt.Println("Error: ", err.Error())
+		return false
+	}
+
+	return match
 }
 
 // Job properties inspired by : https://www.indeed.com/viewjob?jk=5d43c4aa2edf6f41&tk=1hh1n8q22jkuc800&from=serp&vjs=3
@@ -214,6 +235,16 @@ type SkillsTree struct {
 }
 
 func main() {
+	var envApp map[string]string
+	envApp, err := godotenv.Read("./.env")
+	env = envApp
+
+	if err != nil {
+		log.Println("Error loading the .env file. ", err.Error())
+		log.Println("As a consequence, no email notification will be sent to new registered users")
+	}
+
+	fmt.Println(envApp)
 
 	// 1 -- Database Definition
 	// os.Remove("./jobs.gormDb")
@@ -267,9 +298,12 @@ func main() {
 	app.Listen(port)
 }
 
-var secret_key string = "hello"
-var gormDB *gorm.DB
-var DB *sql.DB
+var (
+	secret_key string = "hello"
+	gormDB     *gorm.DB
+	DB         *sql.DB
+	env        map[string]string
+)
 
 func setupRoute(app *fiber.App) {
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -295,6 +329,14 @@ func setupRoute(app *fiber.App) {
 			})
 		}
 
+		fmt.Println(user)
+
+		if !user.IsMandatoryFieldFilled() {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "User credential haven't been filled properly",
+			})
+		}
+
 		// Check that the user doesn't already exist before creating it
 		existingUser := &[]User{}
 		gormDB.Limit(1).Find(existingUser, "username = ?", user.Username)
@@ -303,6 +345,12 @@ func setupRoute(app *fiber.App) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"message": "User with username '" + user.Username + "' already exists",
 			})
+		}
+
+		err := sendGmailNotification(user.Email, user.Username, user.Password)
+		if err != nil {
+			fmt.Println("Failed to send mail ? ---> ", err.Error())
+			return c.SendStatus(fiber.StatusInternalServerError)
 		}
 
 		gormDB.Create(user)
@@ -1225,7 +1273,7 @@ func getAllGraduateCurriculumViateFromDB(db *sql.DB) ([]CurriculumVitae, error) 
 
 	for rows.Next() {
 		tree = SkillsTree{}
-		fmt.Println("rows: ", rows)
+		// fmt.Println("rows: ", rows)
 
 		err = rows.Scan(
 			&cv.Id, &cv.Gpa, &cv.Yoe,
@@ -1252,7 +1300,7 @@ func getAllGraduateCurriculumViateFromDB(db *sql.DB) ([]CurriculumVitae, error) 
 			cv.Tree = append([]SkillsTree{}, tree)
 
 			graduate_id = cv.GraduateId
-			fmt.Println("graduate_id changed !!!")
+			// fmt.Println("graduate_id changed !!!")
 		}
 
 		prevCv = cv
@@ -1268,10 +1316,41 @@ func getAllGraduateCurriculumViateFromDB(db *sql.DB) ([]CurriculumVitae, error) 
 		return nil, err
 	}
 
+	fmt.Println("cvs : ", cvs)
 	return cvs, nil
 }
 
-func sendGmailNotification() (err error) {
+func sendGmailNotification(emailReceiver string, username string, userpass string) (err error) {
+	password := env["GMAIL_PASSWORD"]
+	sender := env["GMAIL_ACCOUNT"]
+	// password := env["YAHOO_PASSWORD"]
+	// sender := env["YAHOO_ACCOUNT"]
+	receiver := []string{emailReceiver}
+
+	subject := "Registration to Job Platform for Graduate Complete"
+	body := "We are happy to count you in ! This Platform is a thriving community." +
+		" for quickstarting your carreer" + "\r\n Here are your credentials:\r\n"
+
+	message := []byte(
+		"To: " + receiver[0] +
+			"\r\nSubject: " + subject +
+			"\r\n\r\n" + body +
+			"\r\n" + "Username: " + username +
+			"\r\n" + "Password: " + userpass,
+	)
+
+	host := "smtp.gmail.com"
+	port := "587"
+	// host := "smtp.mail.yahoo.com"
+	// port := "465"
+	smtpServer := host + ":" + port
+
+	auth := smtp.PlainAuth("", sender, password, host)
+	err = smtp.SendMail(smtpServer, auth, sender, receiver, message)
+
+	if err != nil {
+		log.Println("Failed to send the email notification. Error : ", err.Error())
+	}
 
 	return err
 }
