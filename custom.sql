@@ -76,3 +76,61 @@ inner join (
   inner join job_skills s on t.job_skill_id = s.id 
   inner join users u on t.graduate_id = u.id 
 ) t on c.graduate_id = t.user_id;
+
+
+
+
+
+-- ===========================================================================
+-- ===========================================================================
+-- ===========================================================================
+-- ===========================================================================
+
+-- DROP TABLE CUSTOMERS;
+-- DROP TABLE orders;
+-- DROP TABLE shippings;
+-- DROP TABLE job_skills_tree;
+
+CREATE TABLE IF NOT EXISTS job_roles (
+  id integer primary key autoincrement,
+  name varchar(100)
+);
+
+CREATE TABLE IF NOT EXISTS job_skills (
+  id integer primary key autoincrement,
+  name varchar(100)
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id integer PRIMARY KEY AUTOINCREMENT,
+  title varchar(255),
+  yoe float,
+  role_id int,
+  FOREIGN KEY (role_id) REFERENCES job_roles (id)
+);
+
+CREATE TABLE IF NOT EXISTS job_skills_tree (
+  id integer primary key autoincrement,
+  job_id int,
+  skill_id int,
+  UNIQUE(job_id, skill_id),
+  FOREIGN KEY (job_id) REFERENCES jobs (id),
+  FOREIGN KEY (skill_id) REFERENCES job_skills (id)
+);
+
+-- insert into job_roles (name) values ('Finance Officer'), ('Network Admin'), ('Accountant'), ('IT Intern'), ('Maths Professor'), ('Nurse');
+-- insert into job_skills (name) values ('c#'), ('Docker'), ('Linux'), ('MS Office'), ('Digital Marketing'), ('Phone Repair');
+-- insert into jobs (title, yoe, role_id) values ('We need a Finance Officer', 2, 1), ('IT intern needed', 1.1, 4), ('Looking for an university prof', 4, 5);
+-- insert into job_skills_tree (job_id, skill_id) values (2, 3), (2, 2), (2, 4), (2, 6), (1, 4), (1, 5), (3, 4);
+
+SELECT j.id, j.title, j.yoe, r.id as role_id, r.name AS role_name, t.skill_id, t.skill_name 
+FROM jobs j
+INNER JOIN job_roles r ON r.id = j.role_id
+INNER JOIN (
+  SELECT t.job_id, s.id AS skill_id, s.name AS skill_name 
+  FROM job_skills_tree t
+  INNER JOIN job_skills s ON s.id = t.skill_id
+) t ON t.job_id = j.id
+ORDER BY j.id
+;
+

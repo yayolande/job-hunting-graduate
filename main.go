@@ -60,10 +60,13 @@ func (u User) IsMandatoryFieldFilled() bool {
 
 // Job properties inspired by : https://www.indeed.com/viewjob?jk=5d43c4aa2edf6f41&tk=1hh1n8q22jkuc800&from=serp&vjs=3
 type Job struct {
-	Id             int    `json:"id"`
-	Title          string `json:"title"`
-	Role           string `json:"role"`            // Role & Year of experience (mandatory)
-	YearExperience int    `json:"year_experience"` // Not necessary since similar to role experience
+	Id     int        `json:"id"`
+	Title  string     `json:"title"`
+	Yoe    float64    `json:"yoe"`
+	RoleId int        `json:"role_id"`
+	Role   JobRole    `json:"role" gorm:"foreignKey:RoleId"`
+	Tree   []JobSkill `gorm:"many2many:job_skills_tree"`
+	// Careful, this field must remain private (non-exported), otherwise it will break GORM functionalities. On the other and, this field must be in the same package as the db operation it is related with
 	// Status         bool     `json:"status"`
 	// Description    string   `json:"description"`
 	// Skills         []string `json:"skills"` // Skills & Year of experience (optional)
@@ -75,12 +78,12 @@ type Job struct {
 func (j Job) isValid() error {
 	var err error = nil
 
-	if j.Title == "" || j.Role == "" {
+	if j.Title == "" {
 		err = fmt.Errorf("Job title and role are mandatory when creating new Job")
 		return fiber.ErrBadGateway
 	}
 
-	if j.YearExperience < 0 {
+	if j.Yoe <= 0 || j.RoleId <= 0 {
 		err = fmt.Errorf("Minimum Year of Experience can't go below 0 for creating a new Job")
 		return err
 	}
@@ -255,12 +258,28 @@ func main() {
 		panic("failed to connect to the database")
 	}
 
+	printError := func(err error) {
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+	}
+
 	gormDB = gormDb
-	gormDb.AutoMigrate(&Job{})
-	gormDb.AutoMigrate(&User{})
-	gormDb.AutoMigrate(&JobApplication{})
-	gormDb.AutoMigrate(&Friendship{})
-	gormDb.AutoMigrate(&Message{})
+	// gormDB.Migrator().DropTable(&Job{})
+	err = gormDb.AutoMigrate(&Job{})
+	printError(err)
+	err = gormDb.AutoMigrate(&JobRole{})
+	printError(err)
+	err = gormDb.AutoMigrate(&JobSkill{})
+	printError(err)
+	err = gormDb.AutoMigrate(&User{})
+	printError(err)
+	err = gormDb.AutoMigrate(&JobApplication{})
+	printError(err)
+	err = gormDb.AutoMigrate(&Friendship{})
+	printError(err)
+	err = gormDb.AutoMigrate(&Message{})
+	printError(err)
 
 	db, err := sql.Open("sqlite3", "./jobs.db")
 	if err != nil {
@@ -413,7 +432,15 @@ func setupRoute(app *fiber.App) {
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
-		gormDB.Find(&availableJobs)
+		gormDB.Preload("Tree").Preload("Role").Find(&availableJobs)
+
+		/*
+			for _, el := range availableJobs {
+				el.tree = []JobSkill{{Name: "oreimo"}}
+			}
+		*/
+
+		fmt.Println(availableJobs)
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"jobs": availableJobs,
@@ -979,22 +1006,24 @@ func extractTokenFromAuthHeader(c *fiber.Ctx) string {
 func databaseMigration(db *sql.DB) (err error) {
 	var sqlStmt string = ""
 
-	sqlStmt = `
-    CREATE TABLE IF NOT EXISTS job_roles (
-      id integer primary key autoincrement,
-      name varchar(100)
-    );
-  `
+	/*
+				  sqlStmt = `
+				    CREATE TABLE IF NOT EXISTS job_roles (
+				      id integer primary key autoincrement,
+				      name varchar(100)
+				    );
+				  `
 
-	err = databaseExec(db, sqlStmt)
+					err = databaseExec(db, sqlStmt)
 
-	sqlStmt = `
-    CREATE TABLE IF NOT EXISTS job_skills (
-      id integer primary key autoincrement,
-      name varchar(100)
-    );
-  `
-	err = databaseExec(db, sqlStmt)
+			sqlStmt = `
+		    CREATE TABLE IF NOT EXISTS job_skills (
+		      id integer primary key autoincrement,
+		      name varchar(100)
+		    );
+		  `
+			err = databaseExec(db, sqlStmt)
+	*/
 
 	sqlStmt = `
     CREATE TABLE IF NOT EXISTS skills_tree (
@@ -1021,6 +1050,24 @@ func databaseMigration(db *sql.DB) (err error) {
   `
 
 	err = databaseExec(db, sqlStmt)
+
+	//
+	// =============================== job_skills_tree ====================================
+	//
+	/*
+			sqlStmt = `
+		    CREATE TABLE IF NOT EXISTS job_skills_tree (
+		      id integer primary key autoincrement,
+		      job_id int,
+		      skill_id int,
+		      UNIQUE(job_id, skill_id),
+		      FOREIGN KEY (job_id) REFERENCES jobs (id),
+		      FOREIGN KEY (skill_id) REFERENCES job_skills (id)
+		    );
+		  `
+
+			err = databaseExec(db, sqlStmt)
+	*/
 
 	return err
 }
