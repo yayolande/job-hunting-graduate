@@ -5,8 +5,9 @@
 - [ ] Update job_skills_tree insertion and selection from API
 - [ ] Manage job skills insertion from GORM (optional)
 
-- [ ] Enable CORS on server
+- [x] Enable CORS on server
 - [ ] Compile server for Windows
+- [ ] Allow static file distribution
 - [ ] API documentation
 
 ## Issues With mixing 2 DB packages (GORM & database/sql) when creating tables

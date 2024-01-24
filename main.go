@@ -325,6 +325,24 @@ var (
 )
 
 func setupRoute(app *fiber.App) {
+	app.Use(func(c *fiber.Ctx) error {
+		fmt.Println("Hello From CORS policy manager handler !")
+
+		method := c.Route().Method
+		fmt.Println("Method: ", method)
+		c.Set("Access-Control-Allow-Origin", "*")
+		c.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Set("Access-Control-Allow-Credentials", "true")
+		c.Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+
+		if method == "OPTIONS" {
+			fmt.Println("OPTIONS is OK")
+			return c.SendStatus(fiber.StatusNoContent)
+		}
+
+		return c.Next()
+	})
+
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"hello": "world !",
