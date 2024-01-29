@@ -65,7 +65,7 @@ type Job struct {
 	Yoe    float64    `json:"yoe"`
 	RoleId int        `json:"role_id"`
 	Role   JobRole    `json:"role" gorm:"foreignKey:RoleId"`
-	Tree   []JobSkill `gorm:"many2many:job_skills_tree"`
+	Tree   []JobSkill `json:"tree" gorm:"many2many:job_skills_tree"`
 	// Careful, this field must remain private (non-exported), otherwise it will break GORM functionalities. On the other and, this field must be in the same package as the db operation it is related with
 	// Status         bool     `json:"status"`
 	// Description    string   `json:"description"`
@@ -450,7 +450,8 @@ func setupRoute(app *fiber.App) {
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
-		gormDB.Preload("Tree").Preload("Role").Find(&availableJobs)
+		// gormDB.Preload("Tree").Preload("Role").Find(&availableJobs)
+		gormDB.Model(&Job{}).Preload("Tree").Preload("Role").Find(&availableJobs)
 
 		/*
 			for _, el := range availableJobs {
