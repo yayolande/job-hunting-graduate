@@ -293,7 +293,6 @@ func main() {
 	// skill := JobSkill{Name: "Jest Testing"}
 	// role := JobRole{Name: "Nurse"}
 
-	// saveJobSkillsToDB(db, skill)
 	// saveJobRoleToDB(db, role)
 
 	// saveSkillsTreeToDB(db, SkillsTree{JobSkillId: 30, GraduateId: 2})
@@ -450,7 +449,6 @@ func setupRoute(app *fiber.App) {
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
-		// gormDB.Preload("Tree").Preload("Role").Find(&availableJobs)
 		gormDB.Model(&Job{}).Preload("Tree").Preload("Role").Find(&availableJobs)
 
 		/*
@@ -485,6 +483,33 @@ func setupRoute(app *fiber.App) {
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"job": job,
+		})
+	})
+
+	api.Post("/jobs/skills", func(c *fiber.Ctx) error {
+		type JobSkillTree struct {
+			Job_id   int `json:"job_id"`
+			Skill_id int `json:"job_skill_id"`
+		}
+		skillTree := JobSkillTree{}
+
+		if err := c.BodyParser(&skillTree); err != nil {
+			fmt.Println(err.Error())
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		err := saveJobSkillsToDB(DB, skillTree.Job_id, skillTree.Skill_id)
+		if err != nil {
+			fmt.Println(err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"tree": skillTree,
 		})
 	})
 
@@ -848,7 +873,7 @@ func setupRoute(app *fiber.App) {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
-		err := saveJobSkillsToDB(DB, skill)
+		err := saveSkillsToDB(DB, skill)
 		if err != nil {
 			return c.SendStatus(fiber.StatusInternalServerError)
 		}
@@ -1101,7 +1126,7 @@ func databaseExec(db *sql.DB, sqlStmt string) error {
 	return nil
 }
 
-func saveJobSkillsToDB(db *sql.DB, skill JobSkill) (err error) {
+func saveSkillsToDB(db *sql.DB, skill JobSkill) (err error) {
 	var sqlStmt string = `
     INSERT INTO job_skills (name) VALUES (?);
   `
@@ -1176,6 +1201,20 @@ func saveSkillsTreeToDB(db *sql.DB, tree SkillsTree) (err error) {
     VALUES (?, ?);
   `
 	_, err = db.Exec(sqlStmt, tree.JobSkillId, tree.GraduateId)
+	if err != nil {
+		log.Println(err.Error(), " ---> ", sqlStmt)
+	}
+
+	return err
+}
+
+func saveJobSkillsToDB(db *sql.DB, job_id int, skill_id int) (err error) {
+	var sqlStmt string = `
+  INSERT INTO job_skills_tree (job_id, job_skill_id)
+  VALUES (?, ?);
+  `
+
+	_, err = db.Exec(sqlStmt, job_id, skill_id)
 	if err != nil {
 		log.Println(err.Error(), " ---> ", sqlStmt)
 	}
