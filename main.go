@@ -219,22 +219,20 @@ type JobRole struct {
 }
 
 type CurriculumVitae struct {
-	Id         int          `json:"id"`
-	Gpa        float32      `json:"gpa"`
-	Yoe        float32      `json:"yoe"`
-	GraduateId int          `json:"graduate_id"`
-	JobRoleId  int          `json:"job_role_id"`
-	Graduate   User         `json:"user"`
-	JobRole    JobRole      `json:"job_role"`
-	Tree       []SkillsTree `json:"tree"`
+	Id         int        `json:"id"`
+	Gpa        float32    `json:"gpa"`
+	Yoe        float32    `json:"yoe"`
+	GraduateId int        `json:"graduate_id"`
+	JobRoleId  int        `json:"job_role_id"`
+	Graduate   User       `json:"user" gorm:"foreignKey:GraduateId"`
+	JobRole    JobRole    `json:"job_role" gorm:"foreignKey:JobRoleId"`
+	Tree       []JobSkill `json:"tree" gorm:"many2many:graduate_skills_tree"`
 }
 
 type SkillsTree struct {
-	Id         int      `json:"id"`
-	JobSkillId int      `json:"job_skill_id"`
-	GraduateId int      `json:"graduate_id"`
-	JobSkill   JobSkill `json:"job_skill"`
-	Graduate   User     `json:"graduate"`
+	Id         int `json:"id"`
+	JobSkillId int `json:"job_skill_id"`
+	CVId       int `json:"cv_id"`
 }
 
 func main() {
@@ -280,6 +278,8 @@ func main() {
 	printError(err)
 	err = gormDb.AutoMigrate(&Message{})
 	printError(err)
+	err = gormDb.AutoMigrate(&CurriculumVitae{})
+	printError(err)
 
 	db, err := sql.Open("sqlite3", "./jobs.db")
 	if err != nil {
@@ -288,25 +288,6 @@ func main() {
 	}
 
 	DB = db
-	databaseMigration(db)
-
-	// skill := JobSkill{Name: "Jest Testing"}
-	// role := JobRole{Name: "Nurse"}
-
-	// saveJobRoleToDB(db, role)
-
-	// saveSkillsTreeToDB(db, SkillsTree{JobSkillId: 30, GraduateId: 2})
-	// saveSkillsTreeToDB(db, SkillsTree{JobSkillId: 29, GraduateId: 2})
-
-	cv, err := getGraduateCurriculumViateFromDB(db, 3)
-	cvs, err := getAllGraduateCurriculumViateFromDB(db)
-
-	fmt.Println("CV fetching from DB: ")
-	fmt.Println(cv)
-	fmt.Println("CVS fetching from DB: ")
-	fmt.Println(cvs)
-
-	// return
 
 	// 2 -- Launching the server
 	app := fiber.New()
@@ -386,7 +367,7 @@ func setupRoute(app *fiber.App) {
 		err := sendGmailNotification(user.Email, user.Username, user.Password)
 		if err != nil {
 			fmt.Println("Failed to send mail ? ---> ", err.Error())
-			return c.SendStatus(fiber.StatusInternalServerError)
+			// return c.SendStatus(fiber.StatusInternalServerError)
 		}
 
 		gormDB.Create(user)
@@ -673,6 +654,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
+	// TODO: Enforce the id parameter to be <int> (":my_id<int>", "friend_id<int>")
 	api.Get("/friends/:my_id/:friend_id", func(c *fiber.Ctx) error {
 		myId := c.Params("my_id")
 		friendId := c.Params("friend_id")
@@ -777,7 +759,14 @@ func setupRoute(app *fiber.App) {
 	})
 
 	api.Get("/cv", func(c *fiber.Ctx) error {
-		cvs, err := getAllGraduateCurriculumViateFromDB(DB)
+		cvs := []CurriculumVitae{}
+
+		err := gormDB.Model(&CurriculumVitae{}).
+			Preload("Graduate").
+			Preload("JobRole").
+			Preload("Tree").
+			Find(&cvs).Error
+		// cvs, err := getAllGraduateCurriculumViateFromDB(DB)
 
 		if err != nil {
 			log.Println("[API route ./cv] error while fetching all graduate cv. ", err.Error())
@@ -788,6 +777,27 @@ func setupRoute(app *fiber.App) {
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"cv": cvs,
+		})
+	})
+
+	api.Get("/cv/:my_id<int>", func(c *fiber.Ctx) error {
+		cvId := c.Params("my_id")
+
+		cv := CurriculumVitae{}
+
+		err := gormDB.Where("id = ?", cvId).
+			Preload("Graduate").
+			Preload("JobRole").
+			Preload("Tree").
+			First(&cv).Error
+
+		if err != nil {
+			fmt.Println("DB error: ", err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": err.Error()})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"cv": cv,
 		})
 	})
 
@@ -802,7 +812,8 @@ func setupRoute(app *fiber.App) {
 			})
 		}
 
-		err := saveCurriculumVitae(DB, cv)
+		err := gormDB.Create(&cv).Error
+		// err := saveCurriculumVitae(DB, cv)
 		if err != nil {
 			message := "Unable to save the data to database"
 			log.Println(message, " ---> ", err.Error())
@@ -811,24 +822,26 @@ func setupRoute(app *fiber.App) {
 			})
 		}
 
-		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"cv": cv,
 		})
 	})
 
-	api.Get("/cv/simple", func(c *fiber.Ctx) error {
-		cvs, err := getCurriculumVitae(DB)
-		if err != nil {
-			fmt.Println("[GET /cv/simple] unable to get data from db. Error : ", err.Error())
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Unable to get curriculum_vitae from database",
-			})
-		}
+	/*
+		api.Get("/cv/simple", func(c *fiber.Ctx) error {
+			cvs, err := getCurriculumVitae(DB)
+			if err != nil {
+				fmt.Println("[GET /cv/simple] unable to get data from db. Error : ", err.Error())
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"message": "Unable to get curriculum_vitae from database",
+				})
+			}
 
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"cvs": cvs,
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"cvs": cvs,
+			})
 		})
-	})
+	*/
 
 	api.Get("/cv/skills", func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNotImplemented)
@@ -854,7 +867,10 @@ func setupRoute(app *fiber.App) {
 	})
 
 	api.Get("/skills", func(c *fiber.Ctx) error {
-		skills, err := getJobSkillsFromDB(DB)
+		skills := []JobSkill{}
+
+		err := gormDB.Find(&skills).Error
+
 		if err != nil {
 			fmt.Println("[Error while fetching job_skills from db] ", err.Error())
 			return c.SendStatus(fiber.StatusInternalServerError)
@@ -873,7 +889,8 @@ func setupRoute(app *fiber.App) {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
-		err := saveSkillsToDB(DB, skill)
+		err := gormDB.Create(&skill).Error
+		// err := saveSkillsToDB(DB, skill)
 		if err != nil {
 			return c.SendStatus(fiber.StatusInternalServerError)
 		}
@@ -884,7 +901,10 @@ func setupRoute(app *fiber.App) {
 	})
 
 	api.Get("/job_roles", func(c *fiber.Ctx) error {
-		roles, err := getJobRoleFromDB(DB)
+		roles := []JobRole{}
+
+		err := gormDB.Find(&roles).Error
+		// roles, err := getJobRoleFromDB(DB)
 
 		if err != nil {
 			fmt.Println("[GET /job_roles] ", err.Error())
@@ -904,7 +924,8 @@ func setupRoute(app *fiber.App) {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
-		err := saveJobRoleToDB(DB, role)
+		err := gormDB.Create(&role).Error
+		// err := saveJobRoleToDB(DB, role)
 		if err != nil {
 			fmt.Println("[POST /job_roles] ", err.Error())
 			return c.SendStatus(fiber.StatusInternalServerError)
@@ -1047,74 +1068,75 @@ func extractTokenFromAuthHeader(c *fiber.Ctx) string {
 	return token_string
 }
 
-func databaseMigration(db *sql.DB) (err error) {
-	var sqlStmt string = ""
+func sendGmailNotification(emailReceiver string, username string, userpass string) (err error) {
+	password := env["GMAIL_PASSWORD"]
+	sender := env["GMAIL_ACCOUNT"]
+	// password := env["YAHOO_PASSWORD"]
+	// sender := env["YAHOO_ACCOUNT"]
+	receiver := []string{emailReceiver}
 
-	/*
-				  sqlStmt = `
-				    CREATE TABLE IF NOT EXISTS job_roles (
-				      id integer primary key autoincrement,
-				      name varchar(100)
-				    );
-				  `
+	subject := "Registration to Job Platform for Graduate Complete"
+	body := "We are happy to count you in ! This Platform is a thriving community." +
+		" for quickstarting your carreer" + "\r\n Here are your credentials:\r\n"
 
-					err = databaseExec(db, sqlStmt)
+	message := []byte(
+		"To: " + receiver[0] +
+			"\r\nSubject: " + subject +
+			"\r\n\r\n" + body +
+			"\r\n" + "Username: " + username +
+			"\r\n" + "Password: " + userpass,
+	)
 
-			sqlStmt = `
-		    CREATE TABLE IF NOT EXISTS job_skills (
-		      id integer primary key autoincrement,
-		      name varchar(100)
-		    );
-		  `
-			err = databaseExec(db, sqlStmt)
-	*/
+	host := "smtp.gmail.com"
+	port := "587"
+	// host := "smtp.mail.yahoo.com"
+	// port := "465"
+	smtpServer := host + ":" + port
 
-	sqlStmt = `
-    CREATE TABLE IF NOT EXISTS skills_tree (
-      id integer primary key autoincrement,
-      job_skill_id int,
-      graduate_id int,
-      FOREIGN KEY (graduate_id) REFERENCES users (id),
-      FOREIGN KEY (job_skill_id) REFERENCES job_skills (id)
-    );
-  `
+	auth := smtp.PlainAuth("", sender, password, host)
+	err = smtp.SendMail(smtpServer, auth, sender, receiver, message)
 
-	err = databaseExec(db, sqlStmt)
-
-	sqlStmt = `
-    CREATE TABLE IF NOT EXISTS curriculum_vitae (
-      id integer primary key autoincrement,
-      gpa int CHECK (gpa >= 0),
-      job_role_id int,
-      yoe float,
-      graduate_id int,
-      FOREIGN KEY (job_role_id) REFERENCES job_roles (id),
-      FOREIGN KEY (graduate_id) REFERENCES users (id)
-    );
-  `
-
-	err = databaseExec(db, sqlStmt)
-
-	//
-	// =============================== job_skills_tree ====================================
-	//
-	/*
-			sqlStmt = `
-		    CREATE TABLE IF NOT EXISTS job_skills_tree (
-		      id integer primary key autoincrement,
-		      job_id int,
-		      skill_id int,
-		      UNIQUE(job_id, skill_id),
-		      FOREIGN KEY (job_id) REFERENCES jobs (id),
-		      FOREIGN KEY (skill_id) REFERENCES job_skills (id)
-		    );
-		  `
-
-			err = databaseExec(db, sqlStmt)
-	*/
+	if err != nil {
+		log.Println("Failed to send the email notification. Error : ", err.Error())
+	}
 
 	return err
 }
+
+// ================================================================================================
+// ================================================================================================
+// ==================== Manual Interaction with the DB using standard lib =========================
+// ================================================================================================
+// ================================================================================================
+
+func saveJobSkillsToDB(db *sql.DB, job_id int, skill_id int) (err error) {
+	var sqlStmt string = `
+  INSERT INTO job_skills_tree (job_id, job_skill_id)
+  VALUES (?, ?);
+  `
+
+	_, err = db.Exec(sqlStmt, job_id, skill_id)
+	if err != nil {
+		log.Println(err.Error(), " ---> ", sqlStmt)
+	}
+
+	return err
+}
+
+func saveSkillsTreeToDB(db *sql.DB, tree SkillsTree) (err error) {
+	var sqlStmt string = `
+    INSERT INTO graduate_skills_tree (curriculum_vitae_id, job_skill_id)
+    VALUES (?, ?);
+  `
+	_, err = db.Exec(sqlStmt, tree.CVId, tree.JobSkillId)
+	if err != nil {
+		log.Println(err.Error(), " ---> ", sqlStmt)
+	}
+
+	return err
+}
+
+/*
 
 func databaseExec(db *sql.DB, sqlStmt string) error {
 	_, err := db.Exec(sqlStmt)
@@ -1184,7 +1206,7 @@ func getJobRoleFromDB(db *sql.DB) ([]JobRole, error) {
 
 func saveCurriculumVitae(db *sql.DB, cv CurriculumVitae) (err error) {
 	var sqlStmt string = `
-    INSERT INTO curriculum_vitae (gpa, job_role_id, yoe, graduate_id) 
+    INSERT INTO curriculum_vitae (gpa, job_role_id, yoe, graduate_id)
     VALUES (?, ?, ?, ?);
   `
 	_, err = db.Exec(sqlStmt, cv.Gpa, cv.JobRoleId, cv.Yoe, cv.GraduateId)
@@ -1195,32 +1217,7 @@ func saveCurriculumVitae(db *sql.DB, cv CurriculumVitae) (err error) {
 	return err
 }
 
-func saveSkillsTreeToDB(db *sql.DB, tree SkillsTree) (err error) {
-	var sqlStmt string = `
-    INSERT INTO skills_tree (job_skill_id, graduate_id) 
-    VALUES (?, ?);
-  `
-	_, err = db.Exec(sqlStmt, tree.JobSkillId, tree.GraduateId)
-	if err != nil {
-		log.Println(err.Error(), " ---> ", sqlStmt)
-	}
 
-	return err
-}
-
-func saveJobSkillsToDB(db *sql.DB, job_id int, skill_id int) (err error) {
-	var sqlStmt string = `
-  INSERT INTO job_skills_tree (job_id, job_skill_id)
-  VALUES (?, ?);
-  `
-
-	_, err = db.Exec(sqlStmt, job_id, skill_id)
-	if err != nil {
-		log.Println(err.Error(), " ---> ", sqlStmt)
-	}
-
-	return err
-}
 
 func getJobSkillsFromDB(db *sql.DB) ([]JobSkill, error) {
 	var sqlStmt string = `
@@ -1257,9 +1254,9 @@ func getJobSkillsFromDB(db *sql.DB) ([]JobSkill, error) {
 
 func getGraduateCurriculumViateFromDB(db *sql.DB, graduateId int) (*CurriculumVitae, error) {
 	var sqlStmt string = `
-    select c.id, c.gpa, c.yoe, r.id AS role_id, r.name AS role_name, t.* 
-    from curriculum_vitae c 
-    inner join users u on c.graduate_id = u.id 
+    select c.id, c.gpa, c.yoe, r.id AS role_id, r.name AS role_name, t.*
+    from curriculum_vitae c
+    inner join users u on c.graduate_id = u.id
     inner join job_roles r on c.job_role_id = r.id
     inner join (select u.id AS user_id, u.username AS user_name, s.id AS skill_id, s.name AS skill_name, t.id AS tree_id from skills_tree t inner join job_skills s on t.job_skill_id = s.id inner join users u on t.graduate_id = u.id) t on c.graduate_id = t.user_id
     WHERE t.user_id = ?;
@@ -1346,14 +1343,14 @@ func getCurriculumVitae(db *sql.DB) ([]CurriculumVitae, error) {
 
 func getAllGraduateCurriculumViateFromDB(db *sql.DB) ([]CurriculumVitae, error) {
 	var sqlStmt string = `
-    select c.id, c.gpa, c.yoe, r.id AS role_id, r.name AS role_name, t.* 
-    from curriculum_vitae c 
-    inner join users u on c.graduate_id = u.id 
+    select c.id, c.gpa, c.yoe, r.id AS role_id, r.name AS role_name, t.*
+    from curriculum_vitae c
+    inner join users u on c.graduate_id = u.id
     inner join job_roles r on c.job_role_id = r.id
     inner join (
-      select u.id AS user_id, u.username AS user_name, s.id AS skill_id, s.name AS skill_name, t.id AS tree_id 
-      from skills_tree t 
-      inner join job_skills s on t.job_skill_id = s.id 
+      select u.id AS user_id, u.username AS user_name, s.id AS skill_id, s.name AS skill_name, t.id AS tree_id
+      from skills_tree t
+      inner join job_skills s on t.job_skill_id = s.id
       inner join users u on t.graduate_id = u.id
       where t.graduate_id = u.id
     ) t on c.graduate_id = t.user_id;
@@ -1425,37 +1422,4 @@ func getAllGraduateCurriculumViateFromDB(db *sql.DB) ([]CurriculumVitae, error) 
 	return cvs, nil
 }
 
-func sendGmailNotification(emailReceiver string, username string, userpass string) (err error) {
-	password := env["GMAIL_PASSWORD"]
-	sender := env["GMAIL_ACCOUNT"]
-	// password := env["YAHOO_PASSWORD"]
-	// sender := env["YAHOO_ACCOUNT"]
-	receiver := []string{emailReceiver}
-
-	subject := "Registration to Job Platform for Graduate Complete"
-	body := "We are happy to count you in ! This Platform is a thriving community." +
-		" for quickstarting your carreer" + "\r\n Here are your credentials:\r\n"
-
-	message := []byte(
-		"To: " + receiver[0] +
-			"\r\nSubject: " + subject +
-			"\r\n\r\n" + body +
-			"\r\n" + "Username: " + username +
-			"\r\n" + "Password: " + userpass,
-	)
-
-	host := "smtp.gmail.com"
-	port := "587"
-	// host := "smtp.mail.yahoo.com"
-	// port := "465"
-	smtpServer := host + ":" + port
-
-	auth := smtp.PlainAuth("", sender, password, host)
-	err = smtp.SendMail(smtpServer, auth, sender, receiver, message)
-
-	if err != nil {
-		log.Println("Failed to send the email notification. Error : ", err.Error())
-	}
-
-	return err
-}
+*/
