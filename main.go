@@ -220,8 +220,8 @@ type JobRole struct {
 
 type CurriculumVitae struct {
 	Id         int        `json:"id"`
-	Gpa        float32    `json:"gpa"`
-	Yoe        float32    `json:"yoe"`
+	Gpa        float64    `json:"gpa"`
+	Yoe        float64    `json:"yoe"`
 	GraduateId int        `json:"graduate_id"`
 	JobRoleId  int        `json:"job_role_id"`
 	Graduate   User       `json:"user" gorm:"foreignKey:GraduateId"`
@@ -467,6 +467,50 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
+	api.Get("/jobs/filtered/:my_id<int>?", func(c *fiber.Ctx) error {
+		var passport UserPassport = getUserPassportFromMiddlewareContext(c)
+		var param string = c.Params("my_id")
+
+		user_id, err := strconv.Atoi(param)
+		if err != nil {
+			user_id = passport.Id
+		}
+
+		cv := CurriculumVitae{}
+		err = gormDB.
+			Preload("Graduate").
+			Preload("JobRole").
+			Preload("Tree").
+			Where("graduate_id = ?", user_id).
+			First(&cv).Error
+
+		if err != nil {
+			fmt.Println("Error while loading user CV: ", err.Error())
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		jobs := []Job{}
+		err = gormDB.
+			Preload("Role").
+			Preload("Tree").
+			Find(&jobs).Error
+
+		if err != nil {
+			fmt.Println("Error while laod Job from DB: ", err.Error())
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		filteredJobs := filterJobsByElligibility(cv, jobs)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"jobs": filteredJobs,
+		})
+	})
+
 	api.Post("/jobs/skills", func(c *fiber.Ctx) error {
 		type JobSkillTree struct {
 			Job_id   int `json:"job_id"`
@@ -590,6 +634,52 @@ func setupRoute(app *fiber.App) {
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"graduates": graduates,
+		})
+	})
+
+	api.Get("/user/graduate/filtered/:my_id<int>?", func(c *fiber.Ctx) error {
+		passport := getUserPassportFromMiddlewareContext(c)
+		param := c.Params("my_id")
+		user_id, err := strconv.Atoi(param)
+
+		if err != nil {
+			user_id = passport.Id
+		}
+
+		cv := CurriculumVitae{}
+		err = gormDB.
+			Preload("Graduate").
+			Preload("JobRole").
+			Preload("Tree").
+			Where("graduate_id = ?", user_id).
+			First(&cv).Error
+
+		if err != nil {
+			fmt.Println("CV Db fetch error: ", err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		graduatesCvs := []CurriculumVitae{}
+		err = gormDB.
+			Preload("Graduate").
+			Preload("JobRole").
+			Preload("Tree").
+			Where("graduate_id <> ?", user_id).
+			Find(&graduatesCvs).Error
+
+		if err != nil {
+			fmt.Println("CVS Db fetch error: ", err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		filteredCvs := filterGraduatesByCvToFindPotentialFriends(cv, graduatesCvs)
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"cvs": filteredCvs,
 		})
 	})
 
@@ -1134,6 +1224,72 @@ func saveSkillsTreeToDB(db *sql.DB, tree SkillsTree) (err error) {
 	}
 
 	return err
+}
+
+func filterJobsByElligibility(userCv CurriculumVitae, availableJobs []Job) []Job {
+	filteredJobs := []Job{}
+	points := 0.0
+
+	for _, job := range availableJobs {
+		if userCv.Gpa > 2.5 {
+			points = (userCv.Gpa - 2.5) * 10
+		}
+
+		if userCv.JobRoleId == job.RoleId {
+			points += 10
+			points += userCv.Yoe * 5
+		}
+
+		for _, jobSkill := range job.Tree {
+			for _, cvSkill := range userCv.Tree {
+				if jobSkill.Id == cvSkill.Id {
+					points += 3
+					fmt.Println("Gained points for jobskill: ", jobSkill)
+				}
+			}
+
+		}
+
+		if points >= 15.0 {
+			filteredJobs = append(filteredJobs, job)
+		}
+		fmt.Println("filber job ? Job = ", job, " ---> points = ", points)
+	}
+
+	return filteredJobs
+}
+
+func filterGraduatesByCvToFindPotentialFriends(userCv CurriculumVitae, graduatesCvs []CurriculumVitae) []CurriculumVitae {
+	filteredCvs := []CurriculumVitae{}
+	points := 0.0
+
+	for _, cv := range graduatesCvs {
+		if cv.Gpa > 2.5 {
+			points = (cv.Gpa - 2.5) * 10
+		}
+
+		if cv.JobRoleId == userCv.JobRoleId {
+			points += 10
+			points += cv.Yoe * 5
+		}
+
+		for _, jobSkill := range cv.Tree {
+			for _, cvSkill := range userCv.Tree {
+				if jobSkill.Id == cvSkill.Id {
+					points += 3
+					fmt.Println("Gained points for jobskill: ", jobSkill)
+				}
+			}
+
+		}
+
+		if points >= 10.0 {
+			filteredCvs = append(filteredCvs, cv)
+		}
+		fmt.Println("filber cv ? cv = ", cv, " ---> points = ", points)
+	}
+
+	return filteredCvs
 }
 
 /*
