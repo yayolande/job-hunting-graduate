@@ -60,12 +60,13 @@ func (u User) IsMandatoryFieldFilled() bool {
 
 // Job properties inspired by : https://www.indeed.com/viewjob?jk=5d43c4aa2edf6f41&tk=1hh1n8q22jkuc800&from=serp&vjs=3
 type Job struct {
-	Id     int        `json:"id"`
-	Title  string     `json:"title"`
-	Yoe    float64    `json:"yoe"`
-	RoleId int        `json:"role_id"`
-	Role   JobRole    `json:"role" gorm:"foreignKey:RoleId"`
-	Tree   []JobSkill `json:"tree" gorm:"many2many:job_skills_tree"`
+	Id           int        `json:"id"`
+	Title        string     `json:"title"`
+	Yoe          float64    `json:"yoe"`
+	RoleId       int        `json:"role_id"`
+	Role         JobRole    `json:"role" gorm:"foreignKey:RoleId"`
+	Tree         []JobSkill `json:"tree" gorm:"many2many:job_skills_tree"`
+	IsRecruiting bool       `json:"is_recruiting" gorm:"default:true"`
 	// Careful, this field must remain private (non-exported), otherwise it will break GORM functionalities. On the other and, this field must be in the same package as the db operation it is related with
 	// Status         bool     `json:"status"`
 	// Description    string   `json:"description"`
@@ -115,7 +116,7 @@ func (j JobApplication) isValid() error {
 	jobs := []Job{}
 	graduates := []User{}
 
-	gormDB.Where("id = ?", j.JobId).Find(&jobs)
+	gormDB.Where("id = ? AND is_recruiting = true", j.JobId).Find(&jobs)
 	gormDB.Where("id = ?", j.GraduateId).Find(&graduates)
 
 	if len(jobs) == 0 || len(graduates) == 0 {
@@ -430,7 +431,11 @@ func setupRoute(app *fiber.App) {
 	api.Get("/jobs", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		availableJobs := []Job{}
 
-		gormDB.Model(&Job{}).Preload("Tree").Preload("Role").Find(&availableJobs)
+		gormDB.Model(&Job{}).
+			Where("is_recruiting = true").
+			Preload("Tree").
+			Preload("Role").
+			Find(&availableJobs)
 
 		/*
 			for _, el := range availableJobs {
@@ -493,6 +498,7 @@ func setupRoute(app *fiber.App) {
 
 		jobs := []Job{}
 		err = gormDB.
+			Where("is_recruiting = true").
 			Preload("Role").
 			Preload("Tree").
 			Find(&jobs).Error
@@ -535,6 +541,52 @@ func setupRoute(app *fiber.App) {
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"tree": skillTree,
+		})
+	})
+
+	api.Post("/jobs/close/", func(c *fiber.Ctx) error {
+		job := Job{}
+
+		if err := c.BodyParser(&job); err != nil {
+			fmt.Println("data parsing error: ", err.Error())
+
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		jobSelector := Job{Id: job.Id}
+		err := gormDB.
+			Model(&jobSelector).
+			Update("is_recruiting", job.IsRecruiting).
+			Error
+		if err != nil {
+			fmt.Println("DB error: ", err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_update": job,
+		})
+	})
+
+	api.Get("/jobs/hidden", func(c *fiber.Ctx) error {
+		hiddenJobs := []Job{}
+
+		err := gormDB.
+			Where("is_recruiting = false").
+			Find(&hiddenJobs).Error
+		if err != nil {
+			fmt.Println("DB error: ", err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"jobs": hiddenJobs,
 		})
 	})
 
