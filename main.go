@@ -416,7 +416,9 @@ func setupRoute(app *fiber.App) {
 		token_string, _ := token.SignedString(key)
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"token": token_string,
+			"token":           token_string,
+			"user_passport":   userPassport,
+			"user_credential": userCredential,
 		})
 	})
 
@@ -472,7 +474,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/jobs/filtered/:my_id<int>?", func(c *fiber.Ctx) error {
+	api.Get("/jobs/filtered/:my_id<int>?", graduateEmployerOnlyMiddleware, func(c *fiber.Ctx) error {
 		var passport UserPassport = getUserPassportFromMiddlewareContext(c)
 		var param string = c.Params("my_id")
 
@@ -517,7 +519,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Post("/jobs/skills", func(c *fiber.Ctx) error {
+	api.Post("/jobs/skills", employerOnlyMiddleware, func(c *fiber.Ctx) error {
 		type JobSkillTree struct {
 			Job_id   int `json:"job_id"`
 			Skill_id int `json:"job_skill_id"`
@@ -544,7 +546,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Post("/jobs/close/", func(c *fiber.Ctx) error {
+	api.Post("/jobs/close/", employerOnlyMiddleware, func(c *fiber.Ctx) error {
 		job := Job{}
 
 		if err := c.BodyParser(&job); err != nil {
@@ -653,7 +655,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/application/job/:job_id", func(c *fiber.Ctx) error {
+	api.Get("/application/job/:job_id", employerOnlyMiddleware, func(c *fiber.Ctx) error {
 		var jobId string = c.Params("job_id")
 
 		applications := []JobApplication{}
@@ -666,7 +668,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/application/graduate/:graduate_id", func(c *fiber.Ctx) error {
+	api.Get("/application/graduate/:graduate_id", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		var graduateId string = c.Params("graduate_id")
 
 		applications := []JobApplication{}
@@ -745,7 +747,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/friends", func(c *fiber.Ctx) error {
+	api.Get("/friends", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		friends := []Friendship{}
 
 		gormDB.Preload("From").Preload("To").Find(&friends)
@@ -757,7 +759,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Post("/friends", func(c *fiber.Ctx) error {
+	api.Post("/friends", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		friendship := Friendship{}
 
 		if err := c.BodyParser(&friendship); err != nil {
@@ -781,7 +783,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/friends/:my_id", func(c *fiber.Ctx) error {
+	api.Get("/friends/:my_id", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		id := c.Params("my_id")
 
 		friends := []Friendship{}
@@ -797,7 +799,7 @@ func setupRoute(app *fiber.App) {
 	})
 
 	// TODO: Enforce the id parameter to be <int> (":my_id<int>", "friend_id<int>")
-	api.Get("/friends/:my_id/:friend_id", func(c *fiber.Ctx) error {
+	api.Get("/friends/:my_id/:friend_id", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		myId := c.Params("my_id")
 		friendId := c.Params("friend_id")
 
@@ -893,14 +895,14 @@ func setupRoute(app *fiber.App) {
 			}
 		}
 
-		messages = lastMessages
+		messages = lastMessages[1:]
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"messages": messages,
 		})
 	})
 
-	api.Get("/cv", func(c *fiber.Ctx) error {
+	api.Get("/cv", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		cvs := []CurriculumVitae{}
 
 		err := gormDB.Model(&CurriculumVitae{}).
@@ -922,7 +924,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Get("/cv/:my_id<int>", func(c *fiber.Ctx) error {
+	api.Get("/cv/:my_id<int>", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		cvId := c.Params("my_id")
 
 		cv := CurriculumVitae{}
@@ -943,7 +945,7 @@ func setupRoute(app *fiber.App) {
 		})
 	})
 
-	api.Post("/cv", func(c *fiber.Ctx) error {
+	api.Post("/cv", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		cv := CurriculumVitae{}
 
 		if err := c.BodyParser(&cv); err != nil {
@@ -985,22 +987,37 @@ func setupRoute(app *fiber.App) {
 		})
 	*/
 
-	api.Get("/cv/skills", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusNotImplemented)
-	})
-
-	api.Post("/cv/skills", func(c *fiber.Ctx) error {
+	api.Post("/cv/skills", graduateOnlyMiddleware, func(c *fiber.Ctx) error {
 		skill := SkillsTree{}
 
 		if err := c.BodyParser(&skill); err != nil {
 			fmt.Println("[POST /cv/skills] Error :", err.Error())
-			return c.SendStatus(fiber.StatusBadRequest)
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		var passport UserPassport = getUserPassportFromMiddlewareContext(c)
+		if skill.CVId <= 0 {
+			cv := CurriculumVitae{}
+			err := gormDB.Where("graduate_id = ?", passport.Id).First(&cv).Error
+
+			if err != nil {
+				fmt.Println("DB error while searching for user CV: ", err.Error())
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"message": err.Error(),
+				})
+			}
+
+			skill.CVId = cv.Id
 		}
 
 		err := saveSkillsTreeToDB(DB, skill)
 		if err != nil {
 			fmt.Println("[POST /cv/skills] Error :", err.Error())
-			return c.SendStatus(fiber.StatusInternalServerError)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
 		}
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -1015,7 +1032,9 @@ func setupRoute(app *fiber.App) {
 
 		if err != nil {
 			fmt.Println("[Error while fetching job_skills from db] ", err.Error())
-			return c.SendStatus(fiber.StatusInternalServerError)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
 		}
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -1181,7 +1200,9 @@ func jwtMiddlewareProtect(c *fiber.Ctx) error {
 	})
 
 	if err != nil || !token.Valid {
-		return err
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
 	}
 
 	c.Locals("user_passport", claims.Passport)
@@ -1283,8 +1304,10 @@ func filterJobsByElligibility(userCv CurriculumVitae, availableJobs []Job) []Job
 	points := 0.0
 
 	for _, job := range availableJobs {
+		points = 0.0
+
 		if userCv.Gpa > 2.5 {
-			points = (userCv.Gpa - 2.5) * 10
+			points += (userCv.Gpa - 2.5) * 10
 		}
 
 		if userCv.JobRoleId == job.RoleId {
@@ -1316,8 +1339,10 @@ func filterGraduatesByCvToFindPotentialFriends(userCv CurriculumVitae, graduates
 	points := 0.0
 
 	for _, cv := range graduatesCvs {
+		points = 0.0
+
 		if cv.Gpa > 2.5 {
-			points = (cv.Gpa - 2.5) * 10
+			points += (cv.Gpa - 2.5) * 10
 		}
 
 		if cv.JobRoleId == userCv.JobRoleId {
